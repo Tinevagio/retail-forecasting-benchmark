@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run ruff (lint)
+        run: uv run ruff check src/ tests/ scripts/
+
+      - name: Run ruff (format check)
+        run: uv run ruff format --check src/ tests/ scripts/
+
+      - name: Run mypy
+        run: uv run mypy src/
+        continue-on-error: true  # Start lenient, tighten later
+
+      - name: Run tests with coverage
+        run: uv run pytest --cov=forecasting --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
