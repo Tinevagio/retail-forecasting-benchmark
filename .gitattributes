@@ -1,4 +1,3 @@
-cat > .gitattributes << 'EOF'
 # Auto-detect text files and normalize line endings to LF
 * text=auto eol=lf
 
@@ -14,11 +13,10 @@ cat > .gitattributes << 'EOF'
 *.ini text eol=lf
 *.sh text eol=lf
 
-# Binary files (no conversion)
+# Binary files
 *.png binary
 *.jpg binary
 *.pdf binary
 *.zip binary
 *.parquet binary
 *.csv binary
-EOF
