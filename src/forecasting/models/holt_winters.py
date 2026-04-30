@@ -127,9 +127,9 @@ class HoltWintersBaseline(Forecaster):
         self._fit_called = True
         if train_df.height > 0:
             last_date_val = train_df["date"].max()
-            assert isinstance(
-                last_date_val, date
-            ), f"Expected date, got {type(last_date_val).__name__}"
+            assert isinstance(last_date_val, date), (
+                f"Expected date, got {type(last_date_val).__name__}"
+            )
             self._last_date = last_date_val
         else:
             self._last_date = None
