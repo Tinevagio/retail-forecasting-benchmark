@@ -1,23 +1,21 @@
-"""LightGBM forecaster with direct multi-step strategy.
+"""LightGBM forecaster — phase 3.3 update.
 
-Why direct multi-step (one model per horizon h):
-- Simple to debug: each model is independent, predictions don't compound
-- Avoids error accumulation typical of recursive forecasting
-- Allows different feature sets per horizon if needed (not used here, but
-  we keep the option open)
+Changes vs phase 3.1 version:
+- Tweedie objective option for intermittent demand (default for retail)
+- Stockout correction applied to TRAINING data only, evaluated on raw data
 
-Why LightGBM specifically:
-- Handles tabular features natively (no embedding/normalization required)
-- Fast: the EDA-motivated feature set generates wide tables and LGBM
-  scales well on those
-- Robust: handles mixed types, missing values, outliers without preprocessing
-- Standard in retail forecasting (M5 winners used LightGBM heavily)
+The class signature is backward-compatible: existing callers continue to
+work with default parameters. New parameters:
+- objective: "regression_l1" | "regression_l2" | "tweedie" (default "tweedie")
+- target_correction: "none" | "rolling_mean" | "median" (default "none")
+- tweedie_variance_power: float in (1, 2), default 1.5 (used only with tweedie)
 
-Implementation notes:
-- We follow scikit-learn's API conventions internally for clarity
-- Predictions are clipped at 0 (negative sales are nonsensical)
-- The fit() method handles feature preparation; the user supplies a
-  `feature_cols` list to control which columns are used
+Why Tweedie:
+The Tweedie distribution interpolates between a Poisson (count of events)
+and a Gamma (positive continuous values), making it suited to data that
+mixes many zeros with positive continuous values — exactly retail demand.
+The variance_power parameter controls the mixture; 1.5 is a common starting
+point for retail.
 """
 
 from __future__ import annotations
@@ -29,11 +27,14 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 
+from forecasting.features.stockout_correction import (
+    CorrectionStrategy,
+    correct_stockouts,
+)
 from forecasting.models.base import Forecaster
 
 
 def _next_periods(last_date: date, horizon: int, frequency: str) -> list[date]:
-    """Generate the next `horizon` period start dates after last_date."""
     out = []
     if frequency == "W":
         for h in range(1, horizon + 1):
@@ -52,22 +53,23 @@ def _next_periods(last_date: date, horizon: int, frequency: str) -> list[date]:
 
 
 class LightGBMForecaster(Forecaster):
-    """Direct multi-step LightGBM forecaster.
-
-    Trains one separate LightGBM model per horizon step (h=1, h=2, ..., h=H).
-    Each model sees the same features but a different target (the value h
-    periods ahead).
+    """Direct multi-step LightGBM forecaster with Tweedie + stockout support.
 
     Args:
-        feature_cols: List of column names to use as features.
+        feature_cols: Feature column names to use.
         horizon: Maximum forecast horizon in periods.
-        frequency: "W" or "M", drives date arithmetic at predict time.
-        target_col: Column containing the target values.
-        id_col: Series identifier column.
-        date_col: Date column.
-        lgb_params: Dict of LightGBM hyperparameters. Sensible defaults
-            are applied if None.
+        frequency: "W" or "M".
+        target_col, id_col, date_col: Column names.
+        objective: LightGBM objective. "tweedie" recommended for retail data.
+        target_correction: Strategy to clean training-time target. The test
+            target is never modified (we evaluate against reality).
+        tweedie_variance_power: Only used when objective="tweedie".
+        lgb_params: Override hyperparameters; merged on top of defaults.
         n_estimators: Number of boosting rounds.
+
+    Attributes after fit:
+        _models: dict[h] -> lightgbm.Booster
+        correction_stats: dict with stockout-correction statistics
     """
 
     def __init__(
@@ -78,6 +80,9 @@ class LightGBMForecaster(Forecaster):
         target_col: str = "sales",
         id_col: str = "id",
         date_col: str = "date",
+        objective: str = "tweedie",
+        target_correction: CorrectionStrategy = "none",
+        tweedie_variance_power: float = 1.5,
         lgb_params: dict | None = None,
         n_estimators: int = 200,
     ) -> None:
@@ -87,11 +92,14 @@ class LightGBMForecaster(Forecaster):
         self.target_col = target_col
         self.id_col = id_col
         self.date_col = date_col
+        self.objective = objective
+        self.target_correction = target_correction
+        self.tweedie_variance_power = tweedie_variance_power
         self.n_estimators = n_estimators
 
-        # Sensible defaults; phase 3.3 will tune these via Optuna
-        self.lgb_params = lgb_params or {
-            "objective": "regression_l1",  # MAE-like objective, robust to outliers
+        # Build params dict respecting the caller's overrides
+        defaults = {
+            "objective": objective,
             "metric": "mae",
             "learning_rate": 0.05,
             "num_leaves": 63,
@@ -101,22 +109,29 @@ class LightGBMForecaster(Forecaster):
             "min_data_in_leaf": 20,
             "verbose": -1,
         }
+        if objective == "tweedie":
+            defaults["tweedie_variance_power"] = tweedie_variance_power
+        self.lgb_params = {**defaults, **(lgb_params or {})}
 
         # Filled by fit()
         self._models: dict[int, lgb.Booster] = {}
         self._latest_features: pl.DataFrame | None = None
         self._last_date: date | None = None
+        self.correction_stats: dict[str, float] = {}
 
     @property
     def name(self) -> str:
+        # Provide an informative name for results tables
+        suffix_parts = []
+        if self.objective != "regression_l1":
+            suffix_parts.append(self.objective)
+        if self.target_correction != "none":
+            suffix_parts.append(f"corr-{self.target_correction}")
+        if suffix_parts:
+            return f"LightGBM-{'-'.join(suffix_parts)}"
         return "LightGBMForecaster"
 
     def _build_targets(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Build h-step ahead target columns, one per horizon.
-
-        For horizon h, target_h_col[t] = sales[t + h]. Missing for the last
-        h rows of each series, which we drop before training.
-        """
         df_sorted = df.sort([self.id_col, self.date_col])
         target_cols = [
             pl.col(self.target_col).shift(-h).over(self.id_col).alias(f"_target_h{h}")
@@ -127,23 +142,39 @@ class LightGBMForecaster(Forecaster):
     def fit(self, train_df: pl.DataFrame) -> Self:
         if not self.feature_cols:
             raise ValueError("feature_cols must not be empty")
-
-        # Verify all features exist
         missing = set(self.feature_cols) - set(train_df.columns)
         if missing:
             raise ValueError(f"Missing feature columns in train_df: {missing}")
 
+        # Apply stockout correction (training-only)
+        if self.target_correction != "none":
+            corrected_df, stats = correct_stockouts(
+                train_df,
+                strategy=self.target_correction,
+                target_col=self.target_col,
+                id_col=self.id_col,
+                date_col=self.date_col,
+            )
+            self.correction_stats = stats
+            train_df = corrected_df
+        else:
+            self.correction_stats = {
+                "n_total_rows": train_df.height,
+                "n_suspicious": 0,
+                "share_suspicious": 0.0,
+                "mean_imputed_value": float("nan"),
+            }
+
         df_with_targets = self._build_targets(train_df)
 
-        # Train one model per horizon step
         for h in range(1, self.horizon + 1):
-            target_col = f"_target_h{h}"
-            usable = df_with_targets.filter(pl.col(target_col).is_not_null())
+            target_col_h = f"_target_h{h}"
+            usable = df_with_targets.filter(pl.col(target_col_h).is_not_null())
             if usable.height == 0:
                 continue
 
             X = usable.select(self.feature_cols).to_pandas()
-            y = usable[target_col].to_numpy()
+            y = usable[target_col_h].to_numpy()
 
             train_set = lgb.Dataset(X, label=y)
             booster = lgb.train(
@@ -153,8 +184,6 @@ class LightGBMForecaster(Forecaster):
             )
             self._models[h] = booster
 
-        # Cache the most recent observation per series, with its features.
-        # At predict time we use these as the basis for the h-step forecasts.
         self._latest_features = (
             train_df.sort([self.id_col, self.date_col])
             .group_by(self.id_col, maintain_order=True)
@@ -191,12 +220,8 @@ class LightGBMForecaster(Forecaster):
         rows = []
         for h in range(1, horizon + 1):
             booster = self._models.get(h)
-            if booster is None:
-                # Should only happen if the training data was too short for h
-                preds = np.full(latest.height, np.nan)
-            else:
-                preds = booster.predict(X)
-            preds = np.clip(preds, 0.0, None)  # No negative sales
+            preds = np.full(latest.height, np.nan) if booster is None else booster.predict(X)
+            preds = np.clip(preds, 0.0, None)
             for sku_id, pred_val in zip(latest[self.id_col].to_list(), preds, strict=True):
                 rows.append(
                     {
@@ -209,14 +234,6 @@ class LightGBMForecaster(Forecaster):
         return pl.DataFrame(rows).sort([self.id_col, self.date_col])
 
     def feature_importance(self, importance_type: str = "gain") -> pl.DataFrame:
-        """Return per-feature importance averaged across horizon-specific models.
-
-        Args:
-            importance_type: "gain" or "split" (LightGBM convention).
-
-        Returns:
-            DataFrame with columns: feature, importance.
-        """
         if not self._models:
             raise RuntimeError("Call fit() before feature_importance()")
 
