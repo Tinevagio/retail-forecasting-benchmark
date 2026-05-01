@@ -95,3 +95,4 @@ kaggle.json
 # OS
 Thumbs.db
 .DS_Store
+data/results/

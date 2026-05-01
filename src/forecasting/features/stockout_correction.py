@@ -179,16 +179,12 @@ def correct_stockouts(
         .alias(target_col)
     ).drop(["is_suspicious_zero", "_imputed"])
 
+    # Capture imputed values BEFORE filtering, so the rolling mean has
+    # access to the surrounding non-zero values
     mean_imputed = (
-        flagged.filter(pl.col("is_suspicious_zero"))
-        .select(
-            pl.col(target_col)
-            .rolling_mean(window_size=rolling_window, min_samples=2)
-            .shift(1)
-            .over(id_col)
-        )
-        .to_series()
-        .mean()
+        with_imputation.filter(pl.col("is_suspicious_zero"))
+        .select(pl.col("_imputed").drop_nulls().mean())
+        .to_series()[0]
     )
 
     return corrected, {

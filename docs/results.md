@@ -145,3 +145,71 @@ and stockout-corrected training data — none of which Holt-Winters can leverage
 
 The bar is set: any ML model on this track must beat 0.343 WMAPE to justify
 its complexity.
+
+## Phase 3 — LightGBM with engineered features
+
+### Phase 3.3 final results (run complet, fresh_weekly track)
+
+8,230 SKU x store series, 4-fold walk-forward CV, 131,680 predictions
+per model, ~30min compute time per model.
+
+| Model | WMAPE (mean ± std) | Bias | RMSE | Compute |
+|-------|-------------------|------|------|---------|
+| **HoltWinters (AutoETS, phase 2.2)** | **0.343 ± 0.012** | -5.3% | 13.7 | 2h10 |
+| LightGBM tweedie + correction | 0.360 ± 0.014 | **-2.9%** | 14.1 | ~30min |
+| LightGBM tweedie (no correction) | 0.363 ± 0.019 | -5.7% | 14.4 | ~25min |
+| LightGBM regression_l1 (phase 3.2) | 0.357 ± 0.013 | -10.9% | 14.6 | ~25min |
+| DriftNaive | 0.380 ± 0.015 | -6.6% | 14.5 | <1min |
+
+### Key findings
+
+**1. Holt-Winters retains the lead on this track and test window.**
+
+On the fresh_weekly track over Jan-May 2016 test windows, AutoETS-based
+Holt-Winters with cold-start fallback delivers the best WMAPE (0.343),
+beating the best LightGBM variant by 4-5%. This is consistent with the
+EDA finding that FOODS_3 has weak annual seasonality but strong recent-
+level autocorrelation — exactly what HW captures well per series.
+
+**2. Tweedie + stockout correction successfully addresses the bias.**
+
+The phase 3.2 LightGBM had a -10.9% bias, indicating systematic under-
+forecasting from learning stockout-polluted zeros. Phase 3.3 reduces this
+to -2.9% — a 73% relative reduction. For supply-chain contexts where bias
+drives over- or under-stocking, this is the most valuable improvement.
+
+**3. WMAPE doesn't follow the bias improvement.**
+
+Despite a much cleaner bias, the corrected Tweedie variant has WMAPE
+0.360 vs 0.357 for the original L1 variant — slightly worse. This
+illustrates a classic tension: the correction makes the model statistically
+more "correct" in distribution, but reduces its alignment with the brute
+target which the WMAPE metric measures against.
+
+**4. Feature importance is dominated by rolling statistics.**
+
+Across all LightGBM variants, the top 5 features are rolling means and
+stds on the target. Calendar features, hierarchical lags, and promo
+features contribute marginally. This suggests:
+- The selected test window (Jan-May 2016) excludes major events
+  (Christmas, Thanksgiving, back-to-school), which limits the impact of
+  event features
+- A larger differentiator may emerge on a test window covering Q4 events
+  or on tracks with stronger promotional intensity (e.g., HOBBIES)
+
+### Honest conclusions
+
+On this track and test window:
+- The benchmark is fair (same folds, same metrics, identical infrastructure)
+- The result favors a well-tuned classical method (HoltWinters)
+- The ML stack delivers a substantially better bias profile, which is
+  valuable in itself for inventory contexts
+- Feature engineering motivated by EDA did not provide the expected lift,
+  likely because the test window underrepresents the events those features
+  encode
+
+The next valuable experiments would be:
+- Re-evaluate on a Q4-inclusive test window
+- Apply the same pipeline to non_food_monthly track (HOBBIES — high promo
+  intensity per EDA)
+- Consider a hybrid: HW level + ML residual model

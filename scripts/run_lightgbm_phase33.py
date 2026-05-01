@@ -199,7 +199,20 @@ def main() -> int:
 
     print("\n[6/6] Summary (sorted by WMAPE):")
     summary = aggregate_by_fold(results)
-    print(summary)
+
+    # Save results BEFORE printing, in case the print fails (Windows encoding)
+    import os
+
+    os.makedirs("data/results", exist_ok=True)
+    results.write_csv("data/results/phase33_per_fold.csv")
+    summary.write_csv("data/results/phase33_summary.csv")
+    print("Results saved to data/results/phase33_*.csv")
+
+    # Now print (may fail on some Windows terminals due to Unicode)
+    try:
+        print(summary)
+    except UnicodeEncodeError:
+        print("(Summary print failed due to encoding — see CSV files for results)")
 
     # Feature importance for the full Tweedie + correction variant
     print("\n=== Feature importance (Tweedie + correction, last fold) ===")
@@ -216,6 +229,12 @@ def main() -> int:
     lgb_demo.fit(train_last)
     print(f"\nStockout correction stats: {lgb_demo.correction_stats}")
     importance = lgb_demo.feature_importance()
+    importance.write_csv("data/results/phase33_feature_importance.csv")
+    print("Feature importance saved to data/results/phase33_feature_importance.csv")
+    try:
+        print(importance.head(20))
+    except UnicodeEncodeError:
+        print("(Importance print failed — see CSV file)")
     print(importance.head(20))
 
     return 0
