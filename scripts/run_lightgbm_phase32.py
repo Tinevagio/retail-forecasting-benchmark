@@ -134,7 +134,13 @@ def main() -> int:
     print(f"     Track data: {track_data.shape}")
 
     if args.sample_skus:
-        sample_ids = track_data["id"].unique().sample(args.sample_skus, seed=42).to_list()
+        sample_ids = (
+            track_data["id"]
+            .unique()
+            .sort()  # determinism: unique() doesn't guarantee order
+            .sample(args.sample_skus, seed=42)
+            .to_list()
+        )
         track_data = track_data.filter(pl.col("id").is_in(sample_ids))
         print(f"     Sampled {args.sample_skus} SKUs: {track_data.shape}")
 
