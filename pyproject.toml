@@ -96,6 +96,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803"]  # Test functions can have non-conforming names
 "notebooks/*" = ["E402"]       # Allow imports not at top in notebooks
+"src/forecasting/models/lightgbm_model.py" = [
+    "N806",   # ML convention: X for feature matrix, y for target
+    "SIM108", # if/else with comments is more readable than a ternary
+]
 
 [tool.ruff.format]
 quote-style = "double"
