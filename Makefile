@@ -1,53 +1,75 @@
-.PHONY: help install install-dev data clean test lint format check baseline train-lgbm evaluate
+# Makefile — common development and deployment workflows
+#
+# A Makefile here is mostly documentation: it lists the verbs that matter
+# in the project and gives them short, memorable names. New contributors
+# (and future-you) get a one-line cheatsheet via `make help`.
+#
+# Tested on Linux, macOS, and Git Bash on Windows. Some targets require
+# Docker Desktop running.
+
+.PHONY: help install test lint format check train serve docker-build docker-run docker-stop docker-logs clean
+
+# Default: print help when running `make` with no args
+.DEFAULT_GOAL := help
+
+# ---- Help -----------------------------------------------------------------
 
 help:  ## Show this help message
-	@echo "Usage: make [target]"
+	@echo "Usage: make <target>"
 	@echo ""
-	@echo "Targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "Local development:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install runtime dependencies
-	uv sync
+# ---- Local dev ------------------------------------------------------------
 
-install-dev:  ## Install dev dependencies and pre-commit hooks
+install:  ## Install dependencies (creates/updates the venv)
 	uv sync --all-extras
-	uv run pre-commit install
 
-data:  ## Download M5 dataset from Kaggle
-	uv run python scripts/download_data.py
+test:  ## Run the test suite (excluding slow tests)
+	uv run pytest -v -m "not slow"
 
-clean:  ## Remove cache and temporary files
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
-	find . -type d -name .ruff_cache -exec rm -rf {} +
-	find . -type d -name .mypy_cache -exec rm -rf {} +
-	find . -type d -name *.egg-info -exec rm -rf {} +
-	rm -rf htmlcov/ .coverage
+test-all:  ## Run all tests including slow integration tests
+	uv run pytest -v
 
-test:  ## Run unit tests with coverage
-	uv run pytest
-
-test-fast:  ## Run only fast tests
-	uv run pytest -m "not slow"
-
-lint:  ## Run linters
+lint:  ## Run ruff and mypy
 	uv run ruff check src/ tests/ scripts/
 	uv run mypy src/
 
-format:  ## Format code
+format:  ## Format the code with ruff
 	uv run ruff format src/ tests/ scripts/
 	uv run ruff check --fix src/ tests/ scripts/
 
-check: lint test  ## Run all checks (lint + test)
+check: format lint test  ## Run format + lint + test (pre-commit safety net)
 
-baseline:  ## Train Holt-Winters baseline (all tracks)
-	uv run python scripts/train_baseline.py
+# ---- Training and serving (local Python, no Docker) ----------------------
 
-train-lgbm:  ## Train LightGBM model
-	uv run python scripts/train_ml.py --model lgbm
+train:  ## Train the LightGBM model on store CA_1 (~3 min)
+	uv run python scripts/train_for_serving.py --sample-stores CA_1
 
-evaluate:  ## Run full evaluation and generate reports
-	uv run python scripts/evaluate.py
+serve:  ## Run the API in development mode (auto-reload on code changes)
+	uv run uvicorn forecasting.serving.api:app --reload
 
-mlflow-ui:  ## Launch MLflow UI on port 5000
-	uv run mlflow ui --port 5000
+# ---- Docker workflows -----------------------------------------------------
+
+docker-build:  ## Build the API Docker image
+	docker compose build
+
+docker-run:  ## Start the API in Docker (detached)
+	docker compose up -d
+
+docker-stop:  ## Stop the running container
+	docker compose down
+
+docker-logs:  ## Follow the running container's logs
+	docker compose logs -f api
+
+docker-shell:  ## Open a shell in the running container (debugging)
+	docker compose exec api /bin/bash || docker compose exec api /bin/sh
+
+# ---- Cleanup --------------------------------------------------------------
+
+clean:  ## Remove caches, build artifacts (keeps trained models)
+	rm -rf .pytest_cache .ruff_cache .mypy_cache .coverage htmlcov
+	find . -type d -name __pycache__ -prune -exec rm -rf {} \;
+	find . -type d -name .ipynb_checkpoints -prune -exec rm -rf {} \;

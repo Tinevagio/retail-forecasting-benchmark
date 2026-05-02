@@ -1,0 +1,29 @@
+# docker-compose.yml — local development setup
+#
+# Usage:
+#   docker compose up           # build + run
+#   docker compose up --build   # force rebuild
+#   docker compose down         # stop and remove
+#   docker compose logs -f api  # follow logs
+#
+# The artifacts/ directory on the host is mounted into the container so
+# you can train models with `python scripts/train_for_serving.py` locally
+# and have them immediately picked up by the running API.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: retail-forecasting-api:latest
+    container_name: retail-forecasting-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the artifacts dir read-only — the API doesn't write to it
+      - ./artifacts:/app/artifacts:ro
+    environment:
+      - FORECASTING_ARTIFACTS_DIR=/app/artifacts
+    restart: unless-stopped
+    # Compose will respect the HEALTHCHECK from the Dockerfile and surface
+    # status in `docker ps`

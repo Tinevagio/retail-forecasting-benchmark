@@ -1,0 +1,71 @@
+# Keep the Docker build context small and predictable.
+# Docker copies the entire build context to the daemon before building, so
+# excluding heavy/irrelevant files speeds up `docker build` significantly.
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments and caches
+.venv/
+venv/
+env/
+.uv/
+.cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Tests (the runtime image doesn't run them)
+tests/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# Notebooks and exploratory artifacts
+notebooks/
+*.ipynb_checkpoints/
+
+# Data and trained artifacts (mounted at runtime, not baked into the image)
+data/
+artifacts/
+mlruns/
+
+# Docs and CI metadata
+docs/
+.github/
+*.md
+!README.md
+LICENSE
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Large binary files that aren't needed for the runtime image
+*.pkl
+*.parquet
+*.csv
