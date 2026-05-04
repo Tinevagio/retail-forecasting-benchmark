@@ -132,7 +132,7 @@ else:
     history_pd = sku_history.select(["date", "sales"]).to_pandas()
     # Restrict to the last 2 years for readability
     if len(history_pd) > 0:
-        cutoff = artifact.train_end - timedelta(days=730)
+        cutoff = pd.Timestamp(artifact.train_end - timedelta(days=730))
         history_pd = history_pd[history_pd["date"] >= cutoff]
 
 
@@ -143,7 +143,7 @@ chart_rows = []
 for _, row in history_pd.iterrows():
     chart_rows.append(
         {
-            "date": row["date"],
+            "date": pd.Timestamp(row["date"]),
             "value": row["sales"],
             "series": "Historical sales",
         }
@@ -152,7 +152,7 @@ for _, row in history_pd.iterrows():
 for row in predictions_df.iter_rows(named=True):
     chart_rows.append(
         {
-            "date": row["date"],
+            "date": pd.Timestamp(row["date"]),
             "value": row["prediction"],
             "series": f"Forecast ({artifact.model_name})",
         }
@@ -169,7 +169,7 @@ if show_other_models:
             for row in other_preds.iter_rows(named=True):
                 chart_rows.append(
                     {
-                        "date": row["date"],
+                        "date": pd.Timestamp(row["date"]),
                         "value": row["prediction"],
                         "series": f"Forecast ({other_artifact.model_name})",
                     }
@@ -183,7 +183,7 @@ if not chart_rows:
 
 chart_df = pd.DataFrame(chart_rows)
 chart_pivot = chart_df.pivot_table(index="date", columns="series", values="value", aggfunc="first")
-st.line_chart(chart_pivot, use_container_width=True)
+st.line_chart(chart_pivot, width="stretch")
 
 
 # ---- Numeric forecast table ----------------------------------------------
@@ -192,7 +192,7 @@ st.subheader("Predicted values")
 preds_display = predictions_df.to_pandas()
 preds_display["prediction"] = preds_display["prediction"].round(2)
 preds_display.columns = ["Series", "Date", "Predicted sales"]
-st.dataframe(preds_display, use_container_width=True, hide_index=True)
+st.dataframe(preds_display, width="stretch", hide_index=True)
 
 
 # ---- Stats panel ---------------------------------------------------------

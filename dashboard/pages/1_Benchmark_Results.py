@@ -106,7 +106,7 @@ st.dataframe(
     display[["model_name", "WMAPE", "WMAPE std", "Bias", "RMSE", "MAE", "N obs"]]
     if "WMAPE std" in display.columns
     else display[["model_name", "WMAPE", "Bias", "RMSE", "MAE", "N obs"]],
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -137,7 +137,7 @@ if per_fold is not None:
     st.caption("Walk-forward folds, oldest first.")
     pivoted = per_fold.pivot_table(index="fold_id", columns="model_name", values="wmape")
     st.line_chart(pivoted)
-    st.dataframe(per_fold, use_container_width=True, hide_index=True)
+    st.dataframe(per_fold, width="stretch", hide_index=True)
 
 
 # ---- Feature importance ---------------------------------------------------
@@ -153,7 +153,7 @@ if importance is not None:
     top_n = st.slider("Top N features", 5, 30, 15)
     top = importance.head(top_n).set_index("feature")[["importance"]]
     st.bar_chart(top, horizontal=True)
-    st.dataframe(importance.head(top_n), use_container_width=True, hide_index=True)
+    st.dataframe(importance.head(top_n), width="stretch", hide_index=True)
 else:
     st.info(
         "Feature importance file not found. "
