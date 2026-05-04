@@ -1,113 +1,203 @@
 # Retail Forecasting Benchmark
 
-> Benchmarking ML approaches against industrial Holt-Winters baselines for multi-level retail demand forecasting.
+A reproducible end-to-end forecasting pipeline benchmarking Holt-Winters and LightGBM on the [M5 Walmart dataset](https://www.kaggle.com/competitions/m5-forecasting-accuracy), with an honest analysis of when ML actually beats well-tuned classical methods.
 
-[![CI](https://github.com/Tinevagio/retail-forecasting-benchmark/actions/workflows/ci.yml/badge.svg)](https://github.com/Tinevagio/retail-forecasting-benchmark/actions)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![CI](https://github.com/Tinevagio/retail-forecasting-benchmark/actions/workflows/ci.yml/badge.svg)](https://github.com/Tinevagio/retail-forecasting-benchmark/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-154%20passing-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-88%25-brightgreen)
+![python](https://img.shields.io/badge/python-3.11+-blue)
+![ruff](https://img.shields.io/badge/lint-ruff-orange)
+![mypy](https://img.shields.io/badge/types-mypy%20strict-blue)
 
-## Context
+![Dashboard preview](docs/screenshots/03_dashboard_prediction_explorer.png)
 
-Industrial demand forecasting tools in grocery retail (e.g., AZAP, RELEX, ToolsGroup) typically rely on **Holt-Winters exponential smoothing** with sector-specific frequencies: weekly forecasts for fresh products, monthly for dry goods and non-food. While robust, these methods have well-known limitations:
+## TL;DR
 
-- **No exogenous variables**: promotions, calendar events, and weather are ignored
-- **No information transfer**: each SKU is treated in isolation (cold-start blind)
-- **Limited multi-seasonality**: single seasonal component
-- **Sensitivity to stockouts**: zeros from lost sales pollute the historical signal
+On 8,230 grocery SKUs over 4 walk-forward folds (131,680 predictions per model):
 
-This project quantifies *where* and *by how much* modern ML approaches improve upon a well-tuned Holt-Winters baseline, on the [M5 Forecasting](https://www.kaggle.com/competitions/m5-forecasting-accuracy) dataset (Walmart, ~30k SKUs × 10 stores).
+| Model | WMAPE | Bias | Notes |
+|-------|-------|------|-------|
+| **Holt-Winters (AutoETS)** | **0.343** | -5.3% | Champion on this track |
+| LightGBM Tweedie + stockout correction | 0.360 | **-2.9%** | Best ML variant. Bias divided by ~4 |
+| LightGBM Tweedie | 0.363 | -5.7% | |
+| LightGBM regression_l1 | 0.357 | -10.9% | |
+| DriftNaive | 0.380 | -6.6% | Baseline |
 
-## Approach
+**The takeaway**: well-tuned Holt-Winters retains the lead on this track and test window. LightGBM with EDA-motivated features doesn't beat it on WMAPE — but Tweedie loss + stockout correction divide the bias by ~4, the most operationally valuable improvement in supply-chain contexts.
 
-The benchmark is structured around three forecasting tracks reflecting real-world retail decision frequencies:
+## Why this project
 
-| Track | Aggregation | Horizon | Mapped M5 categories |
-|-------|-------------|---------|----------------------|
-| Fresh | Weekly | 1-4 weeks | FOODS_3 (fast-moving) |
-| Dry / Grocery | Monthly | 1-3 months | FOODS_1, FOODS_2, HOUSEHOLD |
-| Non-food | Monthly | 1-3 months | HOBBIES |
+There's a recurring claim in retail forecasting that ML beats classical methods. In practice, the picture is more nuanced — well-tuned Holt-Winters often holds its own, especially on stable series with weak seasonality. This benchmark exists to interrogate that claim **fairly**: identical splits, identical metrics, identical infrastructure for every model, plus an honest reading of where each method actually shines.
 
-Each track is evaluated at the **decision-relevant aggregation** (weekly or monthly totals), not at daily granularity, mirroring how forecast quality actually drives replenishment.
+## Quick start
 
-## Models compared
+### Run with Docker (recommended for first try)
 
-- **Naive baselines**: seasonal naive, moving average
-- **Holt-Winters** (multi-frequency, mimics AZAP): the industrial baseline to beat
-- **LightGBM**: ML approach with engineered features targeting Holt-Winters blind spots
-- **Deep Learning** (N-BEATS / TFT via [Darts](https://github.com/unit8co/darts)): comparison on rich segments
-- **Hierarchical reconciliation** (MinT, bottom-up, top-down via [HierarchicalForecast](https://nixtlaverse.nixtla.io/hierarchicalforecast))
-
-## Key findings
-
-> *Results to be populated as the project progresses. Expected highlights:*
-> - Promotion-sensitive products: ML improves WMAPE by 25-40%
-> - Stable high-rotation products: marginal gains, suggesting hybrid routing
-> - New products (cold-start): ML dominates via hierarchical feature transfer
-
-## Repository structure
-
-```
-src/forecasting/        # Core Python package
-├── data/              # Loading, preprocessing, splits
-├── features/          # Feature engineering modules
-├── models/            # Model implementations
-├── evaluation/        # Metrics and segmented analysis
-├── reconciliation/    # Hierarchical forecast reconciliation
-└── pipelines/         # Training and prediction pipelines
-
-notebooks/             # Exploratory analyses (read-only artifacts)
-scripts/               # CLI entry points
-tests/                 # Unit tests
-configs/               # YAML configs for experiments
-docs/                  # Methodology and results documentation
-```
-
-## Quickstart
-
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://github.com/astral-sh/uv) (fast Python package manager)
-- Kaggle API credentials (to download M5 data)
-
-### Setup
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/retail-forecasting-benchmark.git
-cd retail-forecasting-benchmark
+make train         # train a model on store CA_1 (~3 min)
+make docker-build  # build the API image
+make docker-run    # start the API at http://localhost:8000
 
-# Install dependencies
-uv sync
-
-# Download M5 data (requires Kaggle API setup)
-make data
-
-# Run tests
-make test
-
-# Train Holt-Winters baseline
-make baseline
-
-# Train LightGBM model
-make train-lgbm
-
-# Run full evaluation
-make evaluate
+curl http://localhost:8000/health
+# {"status":"ok","n_models_loaded":1}
 ```
+
+Interactive Swagger documentation: <http://localhost:8000/docs>
+
+### Run locally with Python
+
+Requires Python 3.11+ and [uv](https://github.com/astral-sh/uv).
+
+```bash
+make install      # install dependencies into .venv
+make train        # train the model
+make serve        # start the API at http://localhost:8000
+make dashboard    # start the Streamlit dashboard at http://localhost:8501
+```
+
+## Dashboard
+
+A standalone Streamlit dashboard tells the project story and lets you explore predictions interactively.
+
+| Home | Benchmark | Prediction Explorer |
+|---|---|---|
+| ![home](docs/screenshots/01_dashboard_home.png) | ![benchmark](docs/screenshots/02_dashboard_benchmark.png) | ![explorer](docs/screenshots/03_dashboard_prediction_explorer.png) |
+
+Pick any of the 8,230 SKUs, choose a model, see its forecast against 2 years of historical sales.
+
+## Architecture
+
+```
+retail-forecasting-benchmark/
+├── src/forecasting/
+│   ├── data/           # Loading, walk-forward CV splits, hierarchical aggregation
+│   ├── features/       # Lags, rolling stats, calendar, SNAP, events, hierarchical, promo, stockout correction
+│   ├── models/         # Forecaster ABC + naive, Holt-Winters (AutoETS), LightGBM
+│   ├── evaluation/     # CV runner, WMAPE/bias/RMSE/MAE metrics, segmented analysis
+│   └── serving/        # FastAPI app, pickle persistence with versioning, Parquet feature store
+├── dashboard/          # Streamlit multi-page app
+├── scripts/            # Benchmark runners, training-for-serving pipeline
+├── tests/              # 154 unit + integration tests, 88% coverage
+├── docs/               # EDA findings, benchmark results, screenshots
+├── Dockerfile          # Multi-stage build, non-root user, healthchecks
+├── docker-compose.yml  # Local dev with volume-mounted artifacts
+└── Makefile            # Common workflow shortcuts
+```
+
+### Design principles
+
+- **Same runner for every model**. The `Forecaster` ABC defines a `fit/predict` contract that naive baselines, Holt-Winters, and LightGBM all implement. The evaluation runner sees them as equivalent — no metric leakage from inconsistent eval code.
+- **Walk-forward splits, no leakage**. 4-fold time-series CV with explicit train/test boundaries. A `gap` parameter is exposed for forward-looking features.
+- **Stockout-aware training**. Suspicious zeros (zero following non-zero rolling mean) are imputed in the training target only — evaluation is always against raw sales.
+- **Tweedie loss for retail demand**. The Tweedie distribution interpolates between Poisson (count of events) and Gamma (positive continuous), making it suited to data that mixes many zeros with positive sales.
+- **Quality gates**. Ruff strict, mypy strict, pytest with coverage threshold, GitHub Actions CI on every push. The same hooks run locally via pre-commit.
 
 ## Methodology
 
-Detailed methodology, including feature engineering rationale, validation strategy (walk-forward time series CV with gap), and metric definitions (WMAPE weighted by sales, bias, segmented analysis) is documented in [`docs/methodology.md`](docs/methodology.md).
+### The track
 
-## Results
+The headline benchmark runs on the `fresh_weekly` track:
 
-Full results, segmented analysis, and discussion of trade-offs are in [`docs/results.md`](docs/results.md).
+- **Universe**: FOODS_3 SKU × store, 8,230 series, 5 years of history
+- **Granularity**: weekly aggregation (sales summed Monday–Sunday)
+- **Horizon**: 4 weeks per fold
+- **Walk-forward**: 4 folds covering Jan-May 2016
+- **Predictions**: 131,680 per model (8,230 series × 4 folds × 4 weeks)
 
-## About this project
+Two more tracks (`dry_monthly` and `non_food_monthly`) are configured but not yet evaluated end-to-end.
 
-I work in supply chain / forecasting in grocery retail and built this project to systematically evaluate where ML provides real value over well-established statistical methods. The goal is not to claim ML wins everywhere — it doesn't — but to identify the conditions under which the additional complexity is justified.
+### Feature set (LightGBM)
+
+31 features across 5 families, all motivated by the [phase 1 EDA](docs/eda_findings.md):
+
+- **Lags** at 1, 2, 4, 8, 13, 26, 52 weeks
+- **Rolling stats** (mean, std) over 4, 13, 26 weeks
+- **Calendar** (month, week of year, year, day of year)
+- **SNAP days per week** (state-aware: California, Texas, Wisconsin)
+- **Named events** flagged individually (Christmas, Thanksgiving, Pesach End, Purim End, Labor Day, Super Bowl) plus a catch-all
+- **Hierarchical lag-1 means** at department, store, and category levels
+- **Promo features** (`is_on_promo` derived from price drops, `price_relative_to_ref`)
+
+### Stockout correction
+
+The EDA identified that ~4-8% of zero-sales weeks are likely stockouts (temporary supply ruptures). Training a model on these polluted zeros teaches it to systematically under-forecast — exactly what the bias on the L1-loss LightGBM showed (-10.9%).
+
+The correction:
+1. Detects zeros that follow a non-zero rolling mean (suspicious)
+2. Imputes them with the rolling-mean value (training data only)
+3. Leaves test targets untouched (we evaluate against reality)
+
+This single change reduced LightGBM's bias from -10.9% to -2.9% on the full track.
+
+## Honest findings
+
+1. **Holt-Winters retains the lead** on this track and test window. Well-tuned classical methods are genuinely competitive on stable retail series.
+
+2. **Tweedie + stockout correction reduce LightGBM's bias by 73%** (from -10.9% to -2.9%). For supply-chain contexts where bias drives stockouts, this is the most valuable improvement.
+
+3. **Feature importance is dominated by rolling statistics** of the target. The EDA-motivated features (SNAP, events, hierarchical lags) under-perform expectations on this test window — partly because Jan-May 2016 excludes major events like Christmas and Thanksgiving.
+
+4. **The bar to beat for ML on retail forecasting** is higher than the community often assumes. Beating Holt-Winters is achievable but requires genuinely informative features, not just model complexity.
+
+Full per-fold results, feature importance breakdowns, and methodological caveats are in [`docs/results.md`](docs/results.md).
+
+## API
+
+Once a model is trained, four endpoints are available:
+
+| Endpoint           | Method | Description                                |
+|--------------------|--------|--------------------------------------------|
+| `/health`          | GET    | Liveness check                             |
+| `/info`            | GET    | List loaded models with metadata           |
+| `/predict`         | POST   | Forecast for a single series               |
+| `/predict-batch`   | POST   | Forecast for up to 1,000 series at once    |
+| `/docs`            | GET    | Auto-generated Swagger UI                  |
+
+Example:
+
+```bash
+curl -X POST http://localhost:8000/predict \
+    -H "Content-Type: application/json" \
+    -d '{"series_id": "FOODS_3_001__CA_1", "horizon": 4, "model_name": "lightgbm-tweedie"}'
+```
+
+```json
+{
+  "series_id": "FOODS_3_001__CA_1",
+  "model_name": "lightgbm-tweedie",
+  "train_end": "2016-05-16",
+  "predictions": [
+    {"date": "2016-05-23", "prediction": 1.84},
+    {"date": "2016-05-30", "prediction": 1.89},
+    {"date": "2016-06-06", "prediction": 2.13},
+    {"date": "2016-06-13", "prediction": 2.22}
+  ]
+}
+```
+
+## Development workflow
+
+```bash
+make help          # list all available targets
+make check         # format + lint + test (run before committing)
+make test          # just run the tests
+make docker-logs   # follow the running container's logs
+```
+
+Pre-commit hooks (`ruff`, `mypy`, `nbstripout`, file checks) run automatically on `git commit`. The same hooks run on the CI to keep local and remote in sync.
+
+## Acknowledgements
+
+- The [M5 Forecasting Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy) Kaggle competition for the dataset
+- The [statsforecast](https://github.com/Nixtla/statsforecast) library for AutoETS — much faster than alternatives, with sensible model selection per series
+- The Walmart M5 winners' write-ups, which informed the choice of Tweedie loss and the stockout-correction strategy
 
 ## License
 
-MIT
+[MIT](LICENSE)
+
+---
+
+*Built as a portfolio project for ML Engineer reconversion. Open to feedback and discussion — feel free to open an issue.*
