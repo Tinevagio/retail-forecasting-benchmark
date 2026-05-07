@@ -189,7 +189,9 @@ class LightGBMForecaster(Forecaster):
             .group_by(self.id_col, maintain_order=True)
             .last()
         )
-        self._last_date = train_df[self.date_col].max()
+        last = train_df[self.date_col].max()
+        assert isinstance(last, date), f"expected date, got {type(last).__name__}"
+        self._last_date = last
         return self
 
     def predict(self, horizon: int, ids: list[str] | None = None) -> pl.DataFrame:

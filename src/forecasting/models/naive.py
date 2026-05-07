@@ -60,7 +60,9 @@ class HistoricalMean(Forecaster):
 
     def fit(self, train_df: pl.DataFrame) -> Self:
         self._means = train_df.group_by("id").agg(pl.col("sales").mean().alias("mean_sales"))
-        self._last_date = train_df["date"].max()
+        last = train_df["date"].max()
+        assert isinstance(last, date), f"expected date, got {type(last).__name__}"
+        self._last_date = last
         return self
 
     def predict(self, horizon: int, ids: list[str] | None = None) -> pl.DataFrame:
@@ -104,7 +106,9 @@ class SeasonalNaive(Forecaster):
     def fit(self, train_df: pl.DataFrame) -> Self:
         # We just store the training series; predictions look back into it
         self._history = train_df.select(["id", "date", "sales"]).clone()
-        self._last_date = train_df["date"].max()
+        last = train_df["date"].max()
+        assert isinstance(last, date), f"expected date, got {type(last).__name__}"
+        self._last_date = last
         return self
 
     def predict(self, horizon: int, ids: list[str] | None = None) -> pl.DataFrame:
@@ -194,7 +198,9 @@ class DriftNaive(Forecaster):
             )
         )
         self._params = params
-        self._last_date = train_df["date"].max()
+        last = train_df["date"].max()
+        assert isinstance(last, date), f"expected date, got {type(last).__name__}"
+        self._last_date = last
         return self
 
     def predict(self, horizon: int, ids: list[str] | None = None) -> pl.DataFrame:
