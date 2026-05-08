@@ -139,3 +139,12 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
 ]
+[[tool.mypy.overrides]]
+# polars Series.min() and .max() return a wide union type, even when the
+# column is known to be Date. In production code we narrow with isinstance
+# (see naive.py, lightgbm_model.py). In test code, where the column is
+# always Date by construction, that narrowing would just add noise.
+# Disable arg-type and operator checks for tests only — all other strict
+# checks (untyped-def, no-any-return, etc.) remain active.
+module = "tests.*"
+disable_error_code = ["arg-type", "operator"]

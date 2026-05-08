@@ -223,7 +223,7 @@ print(xmas_sales)
 # Fraction of days with events
 event_days = calendar.filter(pl.col("event_name_1").is_not_null()).height
 print(
-    f"Days with at least 1 event: {event_days} / {calendar.height} ({100*event_days/calendar.height:.1f}%)"
+    f"Days with at least 1 event: {event_days} / {calendar.height} ({100 * event_days / calendar.height:.1f}%)"
 )
 print(f"\nUnique event types:\n{calendar['event_type_1'].drop_nulls().value_counts()}")
 
@@ -413,7 +413,7 @@ total_zeros = (sample_flagged["sales"] == 0).sum()
 print("On a 500-SKU sample:")
 print(f"  Total zero-sale days:     {total_zeros}")
 print(
-    f"  Suspicious zeros (likely stockouts): {n_suspicious}  ({100*n_suspicious/total_zeros:.1f}%)"
+    f"  Suspicious zeros (likely stockouts): {n_suspicious}  ({100 * n_suspicious / total_zeros:.1f}%)"
 )
 
 
@@ -582,7 +582,7 @@ dataset_start = sales["date"].min()
 cold_start = first_sale.filter(pl.col("first_sale_date") > dataset_start)
 print(f"Total series:                       {first_sale.height}")
 print(
-    f"Series with cold-start (late entry): {cold_start.height}  ({100*cold_start.height/first_sale.height:.1f}%)"
+    f"Series with cold-start (late entry): {cold_start.height}  ({100 * cold_start.height / first_sale.height:.1f}%)"
 )
 
 # Distribution of cold-start dates
