@@ -145,8 +145,11 @@ class TestEvaluateModelWithPredictions:
             return_predictions=True,
         )
         assert (predictions["y_pred"] == 2.5).all()
-        # y_true comes from the test slice and should match the panel rule
-        assert predictions["y_true"].dtype.is_integer()
+        # Both y_true and y_pred are cast to Float64 in the runner so
+        # downstream consumers can rely on a stable schema regardless of
+        # which model produced the prediction.
+        assert predictions["y_true"].dtype == pl.Float64
+        assert predictions["y_pred"].dtype == pl.Float64
 
     def test_metrics_match_between_modes(self) -> None:
         """The metrics returned must be identical with and without

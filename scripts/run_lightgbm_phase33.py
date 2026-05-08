@@ -26,7 +26,11 @@ import polars as pl
 from forecasting.data.aggregate import TRACK_CONFIGS, prepare_track
 from forecasting.data.load import load_calendar, load_prices, load_sales, melt_sales
 from forecasting.data.splits import make_walk_forward_folds
-from forecasting.evaluation.runner import aggregate_by_fold, evaluate_models
+from forecasting.evaluation.runner import (
+    PREDICTIONS_COLUMNS,
+    aggregate_by_fold,
+    evaluate_models,
+)
 from forecasting.features.event_features import (
     NAMED_EVENTS_OF_INTEREST,
     add_weekly_event_features,
@@ -194,7 +198,13 @@ def main() -> int:
         )
 
     t2 = time.time()
-    results = evaluate_models(models, df, folds, horizon=horizon)
+    if args.save_predictions:
+        results, predictions = evaluate_models(
+            models, df, folds, horizon=horizon, return_predictions=True
+        )
+    else:
+        results = evaluate_models(models, df, folds, horizon=horizon)
+        predictions = None
     print(f"     Evaluation completed in {time.time() - t2:.1f}s")
 
     print("\n[6/6] Summary (sorted by WMAPE):")
@@ -207,6 +217,18 @@ def main() -> int:
     results.write_csv("data/results/phase33_per_fold.csv")
     summary.write_csv("data/results/phase33_summary.csv")
     print("Results saved to data/results/phase33_*.csv")
+
+    # Persist per-model predictions (project 2 consumer) when requested.
+    if args.save_predictions and predictions is not None:
+        args.predictions_output_dir.mkdir(parents=True, exist_ok=True)
+        for model_name in predictions["model_name"].unique().to_list():
+            sub = predictions.filter(pl.col("model_name") == model_name)
+            assert tuple(sub.columns) == PREDICTIONS_COLUMNS, (
+                f"Predictions schema drift: {sub.columns} != {PREDICTIONS_COLUMNS}"
+            )
+            out_path = args.predictions_output_dir / f"preds_{model_name}_{args.track}.parquet"
+            sub.write_parquet(out_path)
+            print(f"     Wrote {out_path} ({sub.height:,} rows)")
 
     # Now print (may fail on some Windows terminals due to Unicode)
     try:

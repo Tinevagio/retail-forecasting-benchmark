@@ -192,8 +192,8 @@ def evaluate_model(
                     pl.lit(fold.fold_id).alias("fold_id"),
                     pl.col("id"),
                     pl.col("date"),
-                    pl.col("sales").alias("y_true"),
-                    pl.col("prediction").alias("y_pred"),
+                    pl.col("sales").cast(pl.Float64).alias("y_true"),
+                    pl.col("prediction").cast(pl.Float64).alias("y_pred"),
                 )
             )
 
@@ -205,7 +205,16 @@ def evaluate_model(
     predictions_df = (
         pl.concat(pred_chunks)
         if pred_chunks
-        else pl.DataFrame(schema=dict.fromkeys(PREDICTIONS_COLUMNS, pl.Utf8))
+        else pl.DataFrame(
+            schema={
+                "model_name": pl.Utf8,
+                "fold_id": pl.Int64,
+                "id": pl.Utf8,
+                "date": pl.Date,
+                "y_true": pl.Float64,
+                "y_pred": pl.Float64,
+            }
+        )
     )
     return metrics_df, predictions_df
 

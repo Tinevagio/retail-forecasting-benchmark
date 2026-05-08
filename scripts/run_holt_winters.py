@@ -17,13 +17,18 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
 
 import polars as pl
 
 from forecasting.data.aggregate import TRACK_CONFIGS, prepare_track
 from forecasting.data.load import load_calendar, load_sales, melt_sales
 from forecasting.data.splits import make_walk_forward_folds
-from forecasting.evaluation.runner import aggregate_by_fold, evaluate_models
+from forecasting.evaluation.runner import (
+    PREDICTIONS_COLUMNS,
+    aggregate_by_fold,
+    evaluate_models,
+)
 from forecasting.models.holt_winters import HoltWintersBaseline
 from forecasting.models.naive import DriftNaive, HistoricalMean, SeasonalNaive
 
@@ -59,6 +64,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Parallel jobs for AutoETS. Use 1 on Windows for stability.",
+    )
+    p.add_argument(
+        "--save-predictions",
+        action="store_true",
+        help="If set, persist per-row predictions for each model in parquet "
+        "format (used by downstream stock-optimization project).",
+    )
+    p.add_argument(
+        "--predictions-output-dir",
+        type=Path,
+        default=Path("data/processed"),
+        help="Directory where prediction parquets are written when --save-predictions is set.",
     )
     return p.parse_args()
 
@@ -122,13 +139,30 @@ def main() -> int:
         ),
     ]
     t1 = time.time()
-    results = evaluate_models(models, track_data, folds, horizon=horizon_periods)
+    if args.save_predictions:
+        results, predictions = evaluate_models(
+            models, track_data, folds, horizon=horizon_periods, return_predictions=True
+        )
+    else:
+        results = evaluate_models(models, track_data, folds, horizon=horizon_periods)
+        predictions = None
     print(f"     Evaluation completed in {time.time() - t1:.1f}s")
 
     # 5. Summarize
     print("\n[5/5] Summary (sorted by WMAPE):")
     summary = aggregate_by_fold(results)
     print(summary)
+    # Persist per-model predictions (project 2 consumer) when requested.
+    if args.save_predictions and predictions is not None:
+        args.predictions_output_dir.mkdir(parents=True, exist_ok=True)
+        for model_name in predictions["model_name"].unique().to_list():
+            sub = predictions.filter(pl.col("model_name") == model_name)
+            assert tuple(sub.columns) == PREDICTIONS_COLUMNS, (
+                f"Predictions schema drift: {sub.columns} != {PREDICTIONS_COLUMNS}"
+            )
+            out_path = args.predictions_output_dir / f"preds_{model_name}_{args.track}.parquet"
+            sub.write_parquet(out_path)
+            print(f"     Wrote {out_path} ({sub.height:,} rows)")
 
     # HW-specific coverage report (refit once on full data to get the report)
     print("\n=== Holt-Winters coverage on the last fold ===")
