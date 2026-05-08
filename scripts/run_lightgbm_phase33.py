@@ -106,6 +106,13 @@ def build_features(
 def main() -> int:
     args = parse_args()
     cfg = TRACK_CONFIGS[args.track]
+    if cfg["frequency"] == "D":
+        raise ValueError(
+            f"Track {args.track!r} has frequency='D'. The models in this "
+            f"repo are designed for weekly/monthly aggregation only. "
+            f"Use scripts/build_track_daily_sample.py to materialize the "
+            f"daily sales parquet for downstream consumption."
+        )
 
     print(f"=== Phase 3.3: LightGBM Tweedie + stockout correction on {args.track} ===")
 
@@ -147,7 +154,8 @@ def main() -> int:
 
     print(f"\n[4/6] Building {args.n_folds} walk-forward folds...")
     horizon = cfg["horizon_periods"]
-    horizon_days = horizon * (7 if cfg["frequency"] == "W" else 30)
+    days_per_period = {"D": 1, "W": 7, "M": 30}[cfg["frequency"]]
+    horizon_days = horizon * days_per_period
     folds = make_walk_forward_folds(
         min_date=track_data["date"].min(),
         max_date=track_data["date"].max(),

@@ -165,10 +165,13 @@ TRACK_CONFIGS: dict[str, TrackConfig] = {
         "seasonality": 12,
     },
     "daily_sample": {
-        # Daily SKU x store on a stratified sample of 1000 series.
-        # Designed for project 2 (stock optimization): keeps the daily grain
-        # required by reasonable lead times (3 days), while keeping training
-        # time tractable for slower models (HoltWinters).
+        # NOTE: This track materializes daily SKU x store sales for downstream
+        # consumption (project 2 stock optimization), NOT for training the
+        # models in this repo. The models (HoltWinters, LightGBM, naive
+        # baselines) are designed for weekly/monthly aggregation; running
+        # them with --track daily_sample is rejected at script entry by
+        # explicit checks. Use scripts/build_track_daily_sample.py to
+        # produce the parquet, then consume it externally.
         "frequency": "D",
         "level": "sku_store",
         "categories": [
